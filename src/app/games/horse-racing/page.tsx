@@ -474,21 +474,19 @@ export default function HorseRacingPage() {
           game.phase === "assigning" ||
           game.phase === "results") && (
           <section className="bg-gray-900 p-6 rounded-xl w-full overflow-x-auto">
-            <div className="grid grid-cols-[96px_1fr_96px] sm:grid-cols-[120px_1fr_120px] items-center gap-3 mb-3">
+            <div className="grid grid-cols-[96px_1fr] sm:grid-cols-[120px_1fr] items-center gap-4 mb-3">
               <div className="text-center justify-self-start">
                 <p className="text-sm text-gray-400 mb-1">Card</p>
                 <CardDisplay card={game.currentCard ?? null} large />
               </div>
 
-              <div className="text-center justify-self-center">
+              <div className="text-center justify-self-center w-full px-2">
                 <p className="text-blue-300">You are: {me?.name || "Unknown"}</p>
                 <p className="text-yellow-300">{game.message}</p>
                 <p className="text-gray-400 text-sm">
                   Deck: {deckCount} cards left | Reshuffles: {reshuffleCount}
                 </p>
               </div>
-
-              <div />
             </div>
 
             <div className="grid grid-cols-[64px_repeat(4,minmax(48px,1fr))] gap-1 w-full max-w-[520px] mx-auto overflow-visible">
