@@ -188,28 +188,28 @@ export default function RoomPage({ params }: RoomPageProps) {
 
             {isHost && (
               <section className="bg-gray-900 rounded-xl p-6">
-                <h2 className="text-2xl font-bold mb-4">Choose Game</h2>
+                <h2 className="text-2xl font-bold mb-4">🎮Choose Game🎮</h2>
 
                 <div className="flex flex-col gap-3">
                   <button
                     onClick={() => selectGame("higher-or-lower")}
                     className="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-xl"
                   >
-                    Higher or Lower
+                    ⬆️Higher or Lower⬇️
                   </button>
 
                   <button
                     onClick={() => selectGame("ride-the-bus")}
                     className="bg-red-600 hover:bg-red-700 px-6 py-3 rounded-xl"
                   >
-                    Ride The Bus
+                    🚌Ride The Bus🚌
                   </button>
 
                   <button
                     onClick={() => selectGame("horse-racing")}
                     className="bg-purple-600 hover:bg-purple-700 px-6 py-3 rounded-xl"
                   >
-                    Horse Racing
+                    🏇Horse Racing🏁
                   </button>
                 </div>
 

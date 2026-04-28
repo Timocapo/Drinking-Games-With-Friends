@@ -20,7 +20,7 @@ export default function HomePage() {
   return (
     <main className="min-h-screen bg-gray-950 text-white flex items-center justify-center p-6">
       <div className="bg-gray-900 rounded-2xl p-8 w-full max-w-md flex flex-col gap-6 text-center">
-        <h1 className="text-4xl font-bold">Drinking Games</h1>
+        <h1 className="text-4xl font-bold">🍺Drinking Games🍺 🍹With Friends🍹</h1>
 
         <button
           onClick={createRoom}

@@ -471,7 +471,7 @@ export default function HorseRacingPage() {
           game.phase === "results") && (
           <section className="bg-gray-900 p-6 rounded-xl w-full overflow-x-auto">
             <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 mb-3">
-              <h2 className="text-2xl font-bold justify-self-start">Race Track</h2>
+              <h2 className="text-2xl font-bold justify-self-start">Race</h2>
 
               <div className="text-center justify-self-center">
                 <p className="text-blue-300">You are: {me?.name || "Unknown"}</p>
@@ -554,7 +554,13 @@ export default function HorseRacingPage() {
                           )}
 
                           {finished && row === 1 && (
-                            <div className="text-2xl">{suit} 🏁</div>
+                            <div className="text-2xl">
+                              {game.finishOrder.indexOf(suit) === 0 && "🥇 "}
+                              {game.finishOrder.indexOf(suit) === 1 && "🥈 "}
+                              {game.finishOrder.indexOf(suit) === 2 && "🥉 "}
+                              {game.finishOrder.indexOf(suit) === 3 && "🏁 "}
+                              {suit}
+                            </div>
                           )}
                         </div>
                       );
