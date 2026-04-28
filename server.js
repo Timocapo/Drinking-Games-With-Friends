@@ -666,6 +666,30 @@ app.prepare().then(() => {
       io.to(room.id).emit("room-updated", room);
     });
 
+    socket.on("change-game", ({ roomId, playerId }) => {
+        const room = rooms.get(roomId?.toUpperCase());
+        if (!room) return;
+
+        const player = room.players.find((p) => p.id === playerId);
+        if (!player?.isHost) return;
+
+        stopAutoRace(room);
+
+        room.game = null;
+        room.gameState = null;
+
+        room.players = room.players.map((p) => ({
+            ...p,
+            ready: false,
+        }));
+
+        io.to(room.id).emit("room-updated", room);
+
+        io.to(room.id).emit("return-to-room", {
+            roomId: room.id,
+        });
+    });
+
     socket.on("request-room-state", ({ roomId }) => {
       const room = rooms.get(roomId?.toUpperCase());
       if (!room) return;

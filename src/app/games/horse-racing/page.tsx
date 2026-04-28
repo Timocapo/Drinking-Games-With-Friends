@@ -83,7 +83,11 @@ function CardDisplay({
   const color =
     card?.suit === "♥" || card?.suit === "♦" ? "text-red-600" : "text-black";
 
-  const size = horizontal ? "w-28 h-16" : small ? "w-14 h-20" : "w-16 h-24";
+  const size = horizontal
+    ? "w-20 h-12 sm:w-24 sm:h-14"
+    : small
+    ? "w-12 h-16 sm:w-14 sm:h-20"
+    : "w-11 h-16 sm:w-14 sm:h-20";
 
   if (faceDown || !card) {
     return (
@@ -95,23 +99,45 @@ function CardDisplay({
     );
   }
 
-  return (
-    <div
-      className={`${size} rounded-lg bg-white ${color} flex flex-col justify-between p-2 shadow`}
-    >
-      <div className="text-xs font-bold self-start">
-        {card.rank}
-        {card.suit}
-      </div>
+  if (horizontal) {
+    return (
+      <div
+        className={`${size} rounded-lg bg-white ${color} relative shadow`}
+      >
+        <div className="absolute top-1 left-1 text-xs font-bold leading-none">
+          {card.rank}
+          {card.suit}
+        </div>
 
-      <div className="text-2xl text-center">{card.suit}</div>
+        <div className="absolute inset-0 flex items-center justify-center text-2xl">
+          {card.suit}
+        </div>
 
-      <div className="text-xs font-bold self-end">
-        {card.rank}
-        {card.suit}
+        <div className="absolute bottom-1 right-1 text-xs font-bold leading-none">
+          {card.rank}
+          {card.suit}
+        </div>
       </div>
+    );
+  }
+
+return (
+  <div
+    className={`${size} rounded-lg bg-white ${color} flex flex-col justify-between p-2 shadow`}
+  >
+    <div className="text-xs font-bold self-start">
+      {card.rank}
+      {card.suit}
     </div>
-  );
+
+    <div className="text-2xl text-center">{card.suit}</div>
+
+    <div className="text-xs font-bold self-end">
+      {card.rank}
+      {card.suit}
+    </div>
+  </div>
+);
 }
 
 export default function HorseRacingPage() {
@@ -151,6 +177,10 @@ export default function HorseRacingPage() {
       if (updatedRoom.gameState?.phase !== "racing") {
         setIsAuto(false);
       }
+    });
+
+    socket.on("return-to-room", ({ roomId }) => {
+      window.location.href = `/rooms/${roomId}`;
     });
 
     return () => {
@@ -334,6 +364,9 @@ export default function HorseRacingPage() {
     );
   }
 
+  const deckCount = game.deck?.length ?? 0;
+  const reshuffleCount = game.reshuffleCount ?? 0;
+
   return (
     <main className="min-h-screen bg-gray-950 text-white p-6">
       <div className="max-w-7xl mx-auto flex flex-col gap-6 items-center">
@@ -341,14 +374,6 @@ export default function HorseRacingPage() {
 
         <div className="text-center">
           <p className="text-gray-400">Room: {room.id}</p>
-          <p className="text-blue-300">You are: {me?.name || "Unknown"}</p>
-          <p className="text-yellow-300 mt-2">{game.message}</p>
-          {game.phase !== "betting" && (
-            <p className="text-sm text-gray-400 mt-1">
-              Deck: {game.deck?.length ?? 0} cards left | Reshuffles:{" "}
-              {game.reshuffleCount ?? 0}
-            </p>
-          )}
         </div>
 
         {game.phase === "betting" && (
@@ -416,7 +441,7 @@ export default function HorseRacingPage() {
           <div className="flex flex-col gap-2">
             {room.players.map((player) => {
               const bet = game.bets[player.id];
-
+            
               return (
                 <div
                   key={player.id}
@@ -440,16 +465,24 @@ export default function HorseRacingPage() {
           game.phase === "assigning" ||
           game.phase === "results") && (
           <section className="bg-gray-900 p-6 rounded-xl w-full overflow-x-auto">
-            <div className="flex justify-between items-center mb-4 gap-4">
-              <h2 className="text-2xl font-bold">Race Track</h2>
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 mb-3">
+              <h2 className="text-2xl font-bold justify-self-start">Race Track</h2>
 
-              <div className="text-center">
+              <div className="text-center justify-self-center">
+                <p className="text-blue-300">You are: {me?.name || "Unknown"}</p>
+                <p className="text-yellow-300">{game.message}</p>
+                <p className="text-gray-400 text-sm">
+                  Deck: {deckCount} cards left | Reshuffles: {reshuffleCount}
+                </p>
+              </div>
+
+              <div className="text-center justify-self-end">
                 <p className="text-sm text-gray-400">Current Draw</p>
                 <CardDisplay card={game.currentCard ?? null} small />
               </div>
             </div>
 
-            <div className="grid grid-cols-5 gap-2 min-w-[650px]">
+            <div className="grid grid-cols-[64px_repeat(4,minmax(48px,1fr))] gap-1 w-full max-w-[520px] mx-auto">
               {Array.from({ length: 9 }, (_, rowIndex) => {
                 const row = rowIndex + 1;
                 const trackPosition = 9 - row;
@@ -466,7 +499,7 @@ export default function HorseRacingPage() {
 
                 return (
                   <div key={row} className="contents">
-                    <div className="h-24 flex items-center justify-center">
+                    <div className="h-16 sm:h-20 flex items-center justify-center">
                       {row === 1 ? (
                         <div className="font-bold text-yellow-300">FINISH</div>
                       ) : row === 9 ? (
@@ -493,7 +526,7 @@ export default function HorseRacingPage() {
                       return (
                         <div
                           key={`${row}-${suit}`}
-                          className="h-24 rounded-lg border border-white/10 bg-gray-800 flex items-center justify-center"
+                          className="h-16 sm:h-20 rounded-lg border border-white/10 bg-gray-800 flex items-center justify-center"
                         >
                           {isHere && !finished && (
                             <div
@@ -725,12 +758,26 @@ export default function HorseRacingPage() {
             </div>
 
             {isHost && (
-              <button
-                onClick={restartGame}
-                className="mt-6 bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-xl font-bold w-full"
-              >
-                Restart Game
-              </button>
+              <>
+                <button
+                  onClick={restartGame}
+                  className="mt-6 bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-xl font-bold w-full"
+                >
+                  Restart Game
+                </button>
+
+                <button
+                  onClick={() => {
+                    socket.emit("change-game", {
+                      roomId,
+                      playerId: myPlayerId,
+                    });
+                  }}
+                  className="mt-4 bg-purple-600 hover:bg-purple-700 px-6 py-3 rounded-xl font-bold w-full"
+                >
+                  Change Game
+                </button>
+              </>
             )}
           </section>
         )}

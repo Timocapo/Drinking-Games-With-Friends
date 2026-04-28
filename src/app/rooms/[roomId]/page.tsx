@@ -138,7 +138,7 @@ export default function RoomPage({ params }: RoomPageProps) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Enter your name"
-              className="text-black rounded-lg px-4 py-3"
+              className="bg-white text-black placeholder-gray-500 px-4 py-3 rounded-xl text-center text-lg"
             />
 
             <button

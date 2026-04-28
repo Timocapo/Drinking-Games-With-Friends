@@ -79,6 +79,10 @@ export default function RideTheBusPage() {
       setRoom(updatedRoom);
     });
 
+    socket.on("return-to-room", ({ roomId }) => {
+      window.location.href = `/rooms/${roomId}`;
+    });
+
     return () => {
       socket.disconnect();
     };
@@ -225,7 +229,22 @@ export default function RideTheBusPage() {
             ))}
           </div>
         </div>
+
+        {me?.isHost && (
+          <button
+            onClick={() => {
+              socket.emit("change-game", {
+                roomId,
+                playerId: myPlayerId,
+              });
+            }}
+            className="bg-purple-600 hover:bg-purple-700 px-6 py-3 rounded-xl font-bold"
+          >
+            Change Game
+          </button>
+        )}
       </div>
     </main>
   );
 }
+

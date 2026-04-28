@@ -57,6 +57,10 @@ export default function HigherOrLowerPage() {
       }
     });
 
+    socket.on("return-to-room", ({ roomId }) => {
+      window.location.href = `/rooms/${roomId}`;
+    });
+
     socket.on("room-updated", (updatedRoom: Room) => {
       setRoom(updatedRoom);
     });
@@ -77,6 +81,7 @@ export default function HigherOrLowerPage() {
   const game = room.gameState;
   const currentPlayer = room.players[game.currentPlayerIndex];
   const me = room.players.find((p) => p.id === myPlayerId);
+  const isHost = me?.isHost;
   const isMyTurn = currentPlayer?.id === myPlayerId;
 
   function selectStack(index: number) {
@@ -224,13 +229,27 @@ export default function HigherOrLowerPage() {
           </div>
         </div>
 
-        {game.gameOver && (
-          <button
-            onClick={restart}
-            className="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-xl"
-          >
-            Restart Game
-          </button>
+        {game.gameOver && isHost && (
+          <div className="flex flex-col gap-3 w-full max-w-md">
+            <button
+              onClick={restart}
+              className="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-xl font-bold"
+            >
+              Restart Game
+            </button>
+
+            <button
+              onClick={() => {
+                socket.emit("change-game", {
+                  roomId,
+                  playerId: myPlayerId,
+                });
+              }}
+              className="bg-purple-600 hover:bg-purple-700 px-6 py-3 rounded-xl font-bold"
+            >
+              Change Game
+            </button>
+          </div>
         )}
       </div>
     </main>
