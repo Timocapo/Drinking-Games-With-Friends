@@ -482,12 +482,12 @@ export default function HorseRacingPage() {
               </div>
 
               <div className="text-center justify-self-end">
-                <p className="text-sm text-gray-400">Current Draw</p>
+                <p className="text-sm text-gray-400">Card</p>
                 <CardDisplay card={game.currentCard ?? null} small />
               </div>
             </div>
 
-            <div className="grid grid-cols-[64px_repeat(4,minmax(48px,1fr))] gap-1 w-full max-w-[520px] mx-auto">
+            <div className="grid grid-cols-[64px_repeat(4,minmax(48px,1fr))] gap-1 w-full max-w-[520px] mx-auto overflow-visible">
               {Array.from({ length: 9 }, (_, rowIndex) => {
                 const row = rowIndex + 1;
                 const trackPosition = 9 - row;
@@ -531,11 +531,11 @@ export default function HorseRacingPage() {
                       return (
                         <div
                           key={`${row}-${suit}`}
-                          className="h-16 sm:h-20 rounded-lg border border-white/10 bg-gray-800 flex items-center justify-center"
+                            className="h-16 sm:h-20 rounded-lg border border-white/10 bg-gray-800 flex items-center justify-center overflow-visible relative"
                         >
                           {isHere && !finished && (
                             <div
-                              className={`w-16 h-24 rounded-lg bg-white flex flex-col justify-between p-2 shadow-xl ${
+                                className={`w-16 h-24 rounded-lg bg-white flex flex-col justify-between p-2 shadow-xl relative z-10 ${
                                 suit === "♥" || suit === "♦"
                                   ? "text-red-600"
                                   : "text-black"
@@ -561,7 +561,7 @@ export default function HorseRacingPage() {
                               {game.finishOrder.indexOf(suit) === 3 && "🏁 "}
                               {suit}
                             </div>
-                          )}
+                              )}
                         </div>
                       );
                     })}
