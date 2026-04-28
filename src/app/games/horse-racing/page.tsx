@@ -401,21 +401,26 @@ export default function HorseRacingPage() {
               </div>
             </label>
 
-            <label className="flex flex-col gap-2">
-              <span className="text-sm text-gray-300">Bet amount</span>
+            <label className="flex flex-col gap-3">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-gray-300">Bet amount</span>
+                <span className="text-yellow-300 font-bold">{betAmount}</span>
+              </div>
+
               <input
-                type="number"
-                min={1}
-                max={20}
-                value={betAmount}
-                onChange={(e) =>
-                  setBetAmount(
-                    Math.max(1, Math.min(20, Number(e.target.value)))
-                  )
-                }
-                className="bg-gray-800 text-white px-4 py-2 rounded"
-              />
-            </label>
+              type="range"
+              min={1}
+              max={20}
+              step={1}
+              value={betAmount}
+              onChange={(e) => setBetAmount(Number(e.target.value))}
+              className="w-full"
+            />
+
+            <p className="text-xs text-gray-400 text-center">
+              1 full beer = 20 drinks
+            </p>
+          </label>
 
             <button
               onClick={placeBet}

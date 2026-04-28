@@ -17,21 +17,29 @@ type Player = {
   penalties: number;
 };
 
-type GameState = {
+type HigherOrLowerState = {
   type: "higher-or-lower";
-  grid: Card[][];
   deck: Card[];
-  currentPlayerIndex: number;
-  selectedStackIndex: number | null;
+  grid: Card[][];
+
+  // OLD, keep optional for now
+  currentPlayerIndex?: number;
+
+  // NEW turn system
+  turnOrder?: string[];
+  currentTurnOrderIndex?: number;
+
   streak: number;
+  selectedStackIndex: number | null;
   gameOver: boolean;
   message: string;
 };
 
+
 type Room = {
   id: string;
   players: Player[];
-  gameState: GameState | null;
+  gameState: HigherOrLowerState | null;
 };
 
 let socket: Socket;
@@ -79,7 +87,12 @@ export default function HigherOrLowerPage() {
   }
 
   const game = room.gameState;
-  const currentPlayer = room.players[game.currentPlayerIndex];
+  const currentPlayerId =
+    game.turnOrder?.[game.currentTurnOrderIndex ?? 0];
+
+  const currentPlayer = room.players.find(
+    (player) => player.id === currentPlayerId
+  );
   const me = room.players.find((p) => p.id === myPlayerId);
   const isHost = me?.isHost;
   const isMyTurn = currentPlayer?.id === myPlayerId;
@@ -144,7 +157,7 @@ export default function HigherOrLowerPage() {
         </div>
 
         <div className="grid grid-cols-3 gap-4">
-          {game.grid.map((stack, index) => {
+          {game.grid.map((stack: Card[], index: number) => {
             const topCard = stack[stack.length - 1];
             const isSelected = game.selectedStackIndex === index;
 

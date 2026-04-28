@@ -56,20 +56,37 @@ function shuffleDeck(deck) {
   return [...deck].sort(() => Math.random() - 0.5);
 }
 
+function createTurnOrder(players) {
+  return [...players].sort(() => Math.random() - 0.5).map((player) => player.id);
+}
+
+function getCurrentPlayer(room, gameState) {
+  const currentPlayerId = gameState.turnOrder?.[gameState.currentTurnOrderIndex];
+
+  return room.players.find((player) => player.id === currentPlayerId);
+}
+
+function advanceTurn(gameState) {
+  gameState.currentTurnOrderIndex =
+    (gameState.currentTurnOrderIndex + 1) % gameState.turnOrder.length;
+}
+
 /* -----------------------------
    RIDE THE BUS
 ----------------------------- */
 
 function createRideTheBusState(players) {
-  const randomPlayerIndex = Math.floor(Math.random() * players.length);
+  const turnOrder = createTurnOrder(players);
+  const firstPlayer = players.find((player) => player.id === turnOrder[0]);
 
   return {
     type: "ride-the-bus",
     deck: shuffleDeck(createDeck()),
-    currentPlayerIndex: randomPlayerIndex,
+    turnOrder,
+    currentTurnOrderIndex: 0,
     step: 0,
     turnCards: [],
-    message: `${players[randomPlayerIndex].name} goes first!`,
+    message: `${firstPlayer?.name || "Someone"} goes first!`,
   };
 }
 
@@ -85,7 +102,7 @@ function handleRideTheBusAnswer(room, playerId, answer) {
   const gameState = room.gameState;
   if (!gameState || gameState.type !== "ride-the-bus") return;
 
-  const currentPlayer = room.players[gameState.currentPlayerIndex];
+  const currentPlayer = getCurrentPlayer(room, gameState);
   if (!currentPlayer || currentPlayer.id !== playerId) return;
 
   const card = drawRideTheBusCard(gameState);
@@ -140,13 +157,15 @@ function handleRideTheBusAnswer(room, playerId, answer) {
   gameState.turnCards.push(card);
 
   if (gameState.step === 3) {
-    const nextPlayerIndex =
-      (gameState.currentPlayerIndex + 1) % room.players.length;
+    advanceTurn(gameState);
 
-    gameState.currentPlayerIndex = nextPlayerIndex;
+    const nextPlayer = getCurrentPlayer(room, gameState);
+
     gameState.step = 0;
     gameState.turnCards = [];
-    gameState.message = `${currentPlayer.name} completed all 4! ${room.players[nextPlayerIndex].name}'s turn.`;
+    gameState.message = `${currentPlayer.name} completed all 4! ${
+        nextPlayer?.name || "next player"
+    }'s turn.`;
     return;
   }
 
@@ -166,17 +185,19 @@ function createHigherOrLowerState(players) {
     grid.push([shuffled[i]]);
   }
 
-  const randomPlayerIndex = Math.floor(Math.random() * players.length);
+  const turnOrder = createTurnOrder(players);
+  const firstPlayer = players.find((player) => player.id === turnOrder[0]);
 
   return {
     type: "higher-or-lower",
     deck: shuffled.slice(9),
     grid,
-    currentPlayerIndex: randomPlayerIndex,
+    turnOrder,
+    currentTurnOrderIndex: 0,
     streak: 0,
     selectedStackIndex: null,
     gameOver: false,
-    message: `${players[randomPlayerIndex].name} goes first!`,
+    message: `${firstPlayer?.name || "Someone"} goes first!`,
   };
 }
 
@@ -184,9 +205,8 @@ function handleHigherOrLowerSelectStack(room, playerId, stackIndex) {
   const gameState = room.gameState;
   if (!gameState || gameState.type !== "higher-or-lower") return;
 
-  const currentPlayer = room.players[gameState.currentPlayerIndex];
+  const currentPlayer = getCurrentPlayer(room, gameState);
   if (!currentPlayer || currentPlayer.id !== playerId) return;
-
   if (gameState.gameOver) return;
   if (stackIndex < 0 || stackIndex > 8) return;
 
@@ -197,9 +217,8 @@ function handleHigherOrLowerGuess(room, playerId, choice) {
   const gameState = room.gameState;
   if (!gameState || gameState.type !== "higher-or-lower") return;
 
-  const currentPlayer = room.players[gameState.currentPlayerIndex];
+  const currentPlayer = getCurrentPlayer(room, gameState);
   if (!currentPlayer || currentPlayer.id !== playerId) return;
-
   if (gameState.gameOver) return;
   if (gameState.selectedStackIndex === null) return;
 
@@ -236,15 +255,16 @@ function handleHigherOrLowerGuess(room, playerId, choice) {
     gameState.streak += 1;
 
     if (gameState.streak >= 3) {
-      const nextPlayerIndex =
-        (gameState.currentPlayerIndex + 1) % room.players.length;
-
       const oldPlayerName = currentPlayer.name;
-      const nextPlayerName = room.players[nextPlayerIndex].name;
 
-      gameState.currentPlayerIndex = nextPlayerIndex;
+      advanceTurn(gameState);
+
+      const nextPlayer = getCurrentPlayer(room, gameState);
+
       gameState.streak = 0;
-      gameState.message = `${oldPlayerName} got 3 in a row! ${nextPlayerName}'s turn.`;
+      gameState.message = `${oldPlayerName} got 3 in a row! ${
+        nextPlayer?.name || "next player"
+      }'s turn.`;
     } else {
       gameState.message = `Correct! ${currentPlayer.name} needs ${
         3 - gameState.streak

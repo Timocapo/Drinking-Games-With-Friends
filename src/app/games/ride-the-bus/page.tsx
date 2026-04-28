@@ -24,7 +24,14 @@ type Player = {
 type RideTheBusState = {
   type: "ride-the-bus";
   deck: Card[];
-  currentPlayerIndex: number;
+
+  // OLD (keep optional for now)
+  currentPlayerIndex?: number;
+
+  // NEW turn system
+  turnOrder?: string[];
+  currentTurnOrderIndex?: number;
+
   step: number;
   turnCards: Card[];
   message: string;
@@ -123,7 +130,13 @@ export default function RideTheBusPage() {
   }
 
   const gameState = room.gameState;
-  const currentPlayer = room.players[gameState.currentPlayerIndex];
+  const currentStep = gameState.step ?? 0;
+  const currentPlayerId =
+    gameState.turnOrder?.[gameState.currentTurnOrderIndex ?? 0];
+
+  const currentPlayer = room.players.find(
+    (player) => player.id === currentPlayerId
+  );
   const currentCard = gameState.turnCards[gameState.turnCards.length - 1];
   const me = room.players.find((player) => player.id === myPlayerId);
   const isMyTurn = currentPlayer?.id === myPlayerId;
@@ -147,7 +160,7 @@ export default function RideTheBusPage() {
             </span>
           </p>
 
-          <p className="text-gray-300">Question: {gameState.step + 1} / 4</p>
+          <p className="text-gray-300">Question: {currentStep + 1} / 4</p>
           <p className="text-gray-300">
             Cards left in deck: {gameState.deck.length}
           </p>
@@ -163,7 +176,7 @@ export default function RideTheBusPage() {
           )}
         </div>
 
-        <h2 className="text-3xl font-bold">{questions[gameState.step]}</h2>
+        <h2 className="text-3xl font-bold">{questions[currentStep]}</h2>
 
         <div className="h-52 flex items-center justify-center">
           {currentCard ? (
@@ -192,7 +205,7 @@ export default function RideTheBusPage() {
         </div>
 
         <div className="flex flex-wrap justify-center gap-4">
-          {answersByStep[gameState.step].map((answer) => (
+          {answersByStep[currentStep].map((answer) => (
             <button
               key={answer}
               onClick={() => answerQuestion(answer)}
