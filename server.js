@@ -62,7 +62,6 @@ function createTurnOrder(players) {
 
 function getCurrentPlayer(room, gameState) {
   const currentPlayerId = gameState.turnOrder?.[gameState.currentTurnOrderIndex];
-
   return room.players.find((player) => player.id === currentPlayerId);
 }
 
@@ -150,7 +149,7 @@ function handleRideTheBusAnswer(room, playerId, answer) {
     currentPlayer.drinks += 1;
     gameState.step = 0;
     gameState.turnCards = [card];
-    gameState.message = `Wrong! ${currentPlayer.name} gets 1 drink and restarts at Color.`;
+    gameState.message = `Wrong! ${currentPlayer.name} drinks 1.`;
     return;
   }
 
@@ -163,8 +162,8 @@ function handleRideTheBusAnswer(room, playerId, answer) {
 
     gameState.step = 0;
     gameState.turnCards = [];
-    gameState.message = `${currentPlayer.name} completed all 4! ${
-        nextPlayer?.name || "next player"
+    gameState.message = `${currentPlayer.name} finished. ${
+      nextPlayer?.name || "Next player"
     }'s turn.`;
     return;
   }
@@ -224,7 +223,7 @@ function handleHigherOrLowerGuess(room, playerId, choice) {
 
   if (gameState.deck.length === 0) {
     gameState.gameOver = true;
-    gameState.message = "The deck is empty. Game over!";
+    gameState.message = "Deck empty. Game over!";
     return;
   }
 
@@ -250,7 +249,7 @@ function handleHigherOrLowerGuess(room, playerId, choice) {
     const penalty = selectedStack.length * 2;
     currentPlayer.penalties += penalty;
     gameState.streak = 0;
-    gameState.message = `Same card! ${currentPlayer.name} gets ${penalty} penalty drinks.`;
+    gameState.message = `Tie! ${currentPlayer.name} drinks ${penalty}.`;
   } else if (correct) {
     gameState.streak += 1;
 
@@ -262,26 +261,24 @@ function handleHigherOrLowerGuess(room, playerId, choice) {
       const nextPlayer = getCurrentPlayer(room, gameState);
 
       gameState.streak = 0;
-      gameState.message = `${oldPlayerName} got 3 in a row! ${
-        nextPlayer?.name || "next player"
+      gameState.message = `${oldPlayerName} got 3! ${
+        nextPlayer?.name || "Next player"
       }'s turn.`;
     } else {
-      gameState.message = `Correct! ${currentPlayer.name} needs ${
-        3 - gameState.streak
-      } more.`;
+      gameState.message = `Correct! ${3 - gameState.streak} more.`;
     }
   } else {
     const penalty = selectedStack.length;
     currentPlayer.penalties += penalty;
     gameState.streak = 0;
-    gameState.message = `Wrong! ${currentPlayer.name} gets ${penalty} penalty drinks. Keep going until 3 in a row.`;
+    gameState.message = `Wrong! ${currentPlayer.name} drinks ${penalty}.`;
   }
 
   gameState.selectedStackIndex = null;
 
   if (gameState.deck.length === 0) {
     gameState.gameOver = true;
-    gameState.message = "The deck is empty. Game over!";
+    gameState.message = "Deck empty. Game over!";
   }
 }
 
@@ -379,13 +376,13 @@ function stepHorseRace(room) {
     game.reshuffleCount += 1;
     game.activeDeckCycleSize = game.deck.length;
     game.cardsSinceLastMovement = 0;
-    game.message = `Deck reshuffled. Reshuffle #${game.reshuffleCount}`;
+    game.message = `Deck reshuffled #${game.reshuffleCount}`;
   }
 
   if (game.deck.length === 0) {
     game.phase = "assigning";
     game.stalemateEnded = true;
-    game.message = "Race ended. No cards left. Assign drinks!";
+    game.message = "No cards left. Assign drinks!";
     return;
   }
 
@@ -404,17 +401,17 @@ function stepHorseRace(room) {
       if (canPassGate) {
         game.horses[suit] += 1;
         horseMovedThisStep = true;
-        game.message = `${card.rank}${card.suit} drawn. ${suit} passed the gate!`;
+        game.message = `${card.rank}${card.suit}: ${suit} passed gate!`;
       } else {
-        game.message = `${card.rank}${card.suit} drawn. ${suit} is stuck at the gate.`;
+        game.message = `${card.rank}${card.suit}: ${suit} stuck.`;
       }
     } else {
       game.horses[suit] += 1;
       horseMovedThisStep = true;
-      game.message = `${card.rank}${card.suit} drawn. ${suit} moves forward.`;
+      game.message = `${card.rank}${card.suit}: ${suit} forward.`;
     }
   } else {
-    game.message = `${card.rank}${card.suit} drawn. ${suit} already finished.`;
+    game.message = `${card.rank}${card.suit}: ${suit} finished.`;
   }
 
   const setbackRows = [1, 2, 3, 4, 5, 6, 7];
@@ -447,7 +444,7 @@ function stepHorseRace(room) {
         }
       }
 
-      game.message += ` Setback flipped: ${setbackCard.rank}${setbackSuit}. ${setbackSuit} moves back.`;
+      game.message += ` Setback: ${setbackCard.rank}${setbackSuit} back.`;
     }
   }
 
@@ -470,8 +467,7 @@ function stepHorseRace(room) {
   ) {
     game.phase = "assigning";
     game.stalemateEnded = true;
-    game.message =
-      "Race ended by stalemate. A full deck cycle passed with no horse movement.";
+    game.message = "Stalemate. Assign drinks!";
     return;
   }
 
@@ -687,27 +683,27 @@ app.prepare().then(() => {
     });
 
     socket.on("change-game", ({ roomId, playerId }) => {
-        const room = rooms.get(roomId?.toUpperCase());
-        if (!room) return;
+      const room = rooms.get(roomId?.toUpperCase());
+      if (!room) return;
 
-        const player = room.players.find((p) => p.id === playerId);
-        if (!player?.isHost) return;
+      const player = room.players.find((p) => p.id === playerId);
+      if (!player?.isHost) return;
 
-        stopAutoRace(room);
+      stopAutoRace(room);
 
-        room.game = null;
-        room.gameState = null;
+      room.game = null;
+      room.gameState = null;
 
-        room.players = room.players.map((p) => ({
-            ...p,
-            ready: false,
-        }));
+      room.players = room.players.map((p) => ({
+        ...p,
+        ready: false,
+      }));
 
-        io.to(room.id).emit("room-updated", room);
+      io.to(room.id).emit("room-updated", room);
 
-        io.to(room.id).emit("return-to-room", {
-            roomId: room.id,
-        });
+      io.to(room.id).emit("return-to-room", {
+        roomId: room.id,
+      });
     });
 
     socket.on("request-room-state", ({ roomId }) => {
