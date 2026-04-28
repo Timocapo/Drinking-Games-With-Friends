@@ -74,17 +74,21 @@ function CardDisplay({
   faceDown = false,
   horizontal = false,
   small = false,
+  large = false,
 }: {
   card?: Card | null;
   faceDown?: boolean;
   horizontal?: boolean;
   small?: boolean;
+  large?: boolean;
 }) {
   const color =
     card?.suit === "♥" || card?.suit === "♦" ? "text-red-600" : "text-black";
 
   const size = horizontal
     ? "w-20 h-12 sm:w-24 sm:h-14"
+    : large
+    ? "w-20 h-28 sm:w-24 sm:h-32"
     : small
     ? "w-12 h-16 sm:w-14 sm:h-20"
     : "w-11 h-16 sm:w-14 sm:h-20";
@@ -470,8 +474,11 @@ export default function HorseRacingPage() {
           game.phase === "assigning" ||
           game.phase === "results") && (
           <section className="bg-gray-900 p-6 rounded-xl w-full overflow-x-auto">
-            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 mb-3">
-              <h2 className="text-2xl font-bold justify-self-start">Race</h2>
+            <div className="grid grid-cols-[96px_1fr_96px] sm:grid-cols-[120px_1fr_120px] items-center gap-3 mb-3">
+              <div className="text-center justify-self-start">
+                <p className="text-sm text-gray-400 mb-1">Card</p>
+                <CardDisplay card={game.currentCard ?? null} large />
+              </div>
 
               <div className="text-center justify-self-center">
                 <p className="text-blue-300">You are: {me?.name || "Unknown"}</p>
@@ -481,10 +488,7 @@ export default function HorseRacingPage() {
                 </p>
               </div>
 
-              <div className="text-center justify-self-end">
-                <p className="text-sm text-gray-400">Card</p>
-                <CardDisplay card={game.currentCard ?? null} small />
-              </div>
+              <div />
             </div>
 
             <div className="grid grid-cols-[64px_repeat(4,minmax(48px,1fr))] gap-1 w-full max-w-[520px] mx-auto overflow-visible">
