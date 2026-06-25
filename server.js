@@ -12,17 +12,110 @@ const handler = app.getRequestHandler();
 const rooms = new Map();
 const raceIntervals = new Map();
 
+const MAX_PLAYERS = 12;
 const SUITS = ["♥", "♦", "♠", "♣"];
+
+function normalizeRoomId(roomId) {
+  return String(roomId || "").trim().toUpperCase();
+}
+
+function normalizeName(name) {
+  return String(name || "").trim();
+}
+
+function normalizeNameKey(name) {
+  return normalizeName(name).toLowerCase();
+}
+
+function hasActiveGame(room) {
+  return Boolean(room?.game && room?.gameState);
+}
 
 function createPlayer(id, name, isHost = false) {
   return {
     id,
-    name: name?.trim() || "Guest",
+    name: normalizeName(name) || "Guest",
     isHost,
     ready: false,
     drinks: 0,
     penalties: 0,
+    connected: false,
+    socketIds: [],
+    lastSeen: null,
   };
+}
+
+function addSocketToPlayer(player, socketId) {
+  if (!player.socketIds) player.socketIds = [];
+
+  if (!player.socketIds.includes(socketId)) {
+    player.socketIds.push(socketId);
+  }
+
+  player.connected = true;
+  player.lastSeen = null;
+}
+
+function removeSocketFromPlayer(player, socketId) {
+  if (!player.socketIds) player.socketIds = [];
+
+  player.socketIds = player.socketIds.filter((id) => id !== socketId);
+  player.connected = player.socketIds.length > 0;
+
+  if (!player.connected) {
+    player.lastSeen = Date.now();
+  }
+}
+
+function findPlayerForJoin(room, playerId, name) {
+  const cleanPlayerId = String(playerId || "").trim();
+  const cleanNameKey = normalizeNameKey(name);
+
+  if (cleanPlayerId) {
+    const exactPlayer = room.players.find((player) => player.id === cleanPlayerId);
+    if (exactPlayer) return exactPlayer;
+  }
+
+  // If a game is already running, do not create extra player slots.
+  // Instead, allow a reconnect by matching a saved name to an existing offline player.
+  // This helps if a browser lost localStorage but the player enters the same name again.
+  if (hasActiveGame(room) && cleanNameKey) {
+    const matches = room.players.filter(
+      (player) => normalizeNameKey(player.name) === cleanNameKey
+    );
+
+    if (matches.length === 1) {
+      return matches[0];
+    }
+
+    const offlineMatches = matches.filter((player) => !player.connected);
+    if (offlineMatches.length === 1) {
+      return offlineMatches[0];
+    }
+  }
+
+  return null;
+}
+
+function syncPlayerConnection(room, socket, player, name) {
+  const cleanName = normalizeName(name);
+
+  if (cleanName && !hasActiveGame(room)) {
+    player.name = cleanName;
+  }
+
+  addSocketToPlayer(player, socket.id);
+  socket.join(room.id);
+
+  socket.emit("player-joined", {
+    roomId: room.id,
+    playerId: player.id,
+    name: player.name,
+  });
+}
+
+function emitRoomUpdated(io, room) {
+  io.to(room.id).emit("room-updated", room);
 }
 
 function createDeck() {
@@ -61,13 +154,18 @@ function createTurnOrder(players) {
 }
 
 function getCurrentPlayer(room, gameState) {
-  const currentPlayerId = gameState.turnOrder?.[gameState.currentTurnOrderIndex];
+  const currentPlayerId = gameState.turnOrder?.[gameState.currentTurnOrderIndex ?? 0];
   return room.players.find((player) => player.id === currentPlayerId);
 }
 
 function advanceTurn(gameState) {
+  if (!gameState.turnOrder?.length) {
+    gameState.currentTurnOrderIndex = 0;
+    return;
+  }
+
   gameState.currentTurnOrderIndex =
-    (gameState.currentTurnOrderIndex + 1) % gameState.turnOrder.length;
+    ((gameState.currentTurnOrderIndex ?? 0) + 1) % gameState.turnOrder.length;
 }
 
 /* -----------------------------
@@ -543,7 +641,7 @@ function startAutoRace(room, speed = 1000, io) {
     }
 
     stepHorseRace(room);
-    io.to(room.id).emit("room-updated", room);
+    emitRoomUpdated(io, room);
 
     if (room.gameState.phase !== "racing") {
       clearInterval(interval);
@@ -572,15 +670,20 @@ app.prepare().then(() => {
     cors: {
       origin: "*",
     },
+    connectionStateRecovery: {
+      maxDisconnectionDuration: 2 * 60 * 1000,
+      skipMiddlewares: true,
+    },
+    pingTimeout: 30000,
+    pingInterval: 25000,
   });
 
   io.on("connection", (socket) => {
     console.log("User connected:", socket.id);
 
     socket.on("join-room", ({ roomId, name, playerId }) => {
-      if (!roomId) return;
-
-      const normalizedRoomId = roomId.toUpperCase();
+      const normalizedRoomId = normalizeRoomId(roomId);
+      if (!normalizedRoomId) return;
 
       if (!rooms.has(normalizedRoomId)) {
         rooms.set(normalizedRoomId, {
@@ -593,33 +696,46 @@ app.prepare().then(() => {
       }
 
       const room = rooms.get(normalizedRoomId);
+      const cleanName = normalizeName(name) || "Guest";
+      let player = findPlayerForJoin(room, playerId, cleanName);
 
-      if (room.players.length >= 12) {
-        socket.emit("room-full");
+      if (!player && hasActiveGame(room)) {
+        socket.emit("join-denied", {
+          message:
+            "This game already started. Rejoin with the same browser/name, or ask the host to change games.",
+        });
         return;
       }
 
-      const savedPlayerId = playerId || socket.id;
-      const existingPlayer = room.players.find(
-        (player) => player.id === savedPlayerId
-      );
+      if (!player) {
+        if (room.players.length >= MAX_PLAYERS) {
+          socket.emit("room-full");
+          return;
+        }
 
-      if (!existingPlayer) {
         const isHost = room.players.length === 0;
-        const player = createPlayer(savedPlayerId, name, isHost);
+        const newPlayerId = playerId || socket.id;
+        player = createPlayer(newPlayerId, cleanName, isHost);
         room.players.push(player);
 
         if (isHost) {
-          room.hostId = savedPlayerId;
+          room.hostId = newPlayerId;
         }
       }
 
-      socket.join(normalizedRoomId);
-      io.to(normalizedRoomId).emit("room-updated", room);
+      syncPlayerConnection(room, socket, player, cleanName);
+      emitRoomUpdated(io, room);
+
+      if (room.game && room.gameState) {
+        socket.emit("game-started", {
+          game: room.game,
+          roomId: room.id,
+        });
+      }
     });
 
     socket.on("toggle-ready", ({ roomId, playerId }) => {
-      const room = rooms.get(roomId?.toUpperCase());
+      const room = rooms.get(normalizeRoomId(roomId));
       if (!room) return;
 
       room.players = room.players.map((player) =>
@@ -628,11 +744,11 @@ app.prepare().then(() => {
           : player
       );
 
-      io.to(room.id).emit("room-updated", room);
+      emitRoomUpdated(io, room);
     });
 
     socket.on("select-game", ({ roomId, playerId, game }) => {
-      const room = rooms.get(roomId?.toUpperCase());
+      const room = rooms.get(normalizeRoomId(roomId));
       if (!room) return;
 
       const player = room.players.find((p) => p.id === playerId);
@@ -643,11 +759,11 @@ app.prepare().then(() => {
       room.game = game;
       room.gameState = null;
 
-      io.to(room.id).emit("room-updated", room);
+      emitRoomUpdated(io, room);
     });
 
     socket.on("start-game", ({ roomId, playerId }) => {
-      const room = rooms.get(roomId?.toUpperCase());
+      const room = rooms.get(normalizeRoomId(roomId));
       if (!room) return;
 
       const player = room.players.find((p) => p.id === playerId);
@@ -679,11 +795,11 @@ app.prepare().then(() => {
         roomId: room.id,
       });
 
-      io.to(room.id).emit("room-updated", room);
+      emitRoomUpdated(io, room);
     });
 
     socket.on("change-game", ({ roomId, playerId }) => {
-      const room = rooms.get(roomId?.toUpperCase());
+      const room = rooms.get(normalizeRoomId(roomId));
       if (!room) return;
 
       const player = room.players.find((p) => p.id === playerId);
@@ -699,103 +815,111 @@ app.prepare().then(() => {
         ready: false,
       }));
 
-      io.to(room.id).emit("room-updated", room);
+      emitRoomUpdated(io, room);
 
       io.to(room.id).emit("return-to-room", {
         roomId: room.id,
       });
     });
 
-    socket.on("request-room-state", ({ roomId }) => {
-      const room = rooms.get(roomId?.toUpperCase());
+    socket.on("request-room-state", ({ roomId, playerId, name }) => {
+      const normalizedRoomId = normalizeRoomId(roomId);
+      const room = rooms.get(normalizedRoomId);
       if (!room) return;
 
-      socket.join(room.id);
-      socket.emit("room-updated", room);
+      const player = findPlayerForJoin(room, playerId, name);
+
+      if (player) {
+        syncPlayerConnection(room, socket, player, name);
+        emitRoomUpdated(io, room);
+      } else {
+        socket.join(room.id);
+        socket.emit("room-updated", room);
+      }
     });
 
     socket.on("ride-the-bus-answer", ({ roomId, playerId, answer }) => {
-      const room = rooms.get(roomId?.toUpperCase());
+      const room = rooms.get(normalizeRoomId(roomId));
       if (!room) return;
 
       handleRideTheBusAnswer(room, playerId, answer);
 
-      io.to(room.id).emit("room-updated", room);
+      emitRoomUpdated(io, room);
     });
 
     socket.on(
       "higher-or-lower-select-stack",
       ({ roomId, playerId, stackIndex }) => {
-        const room = rooms.get(roomId?.toUpperCase());
+        const room = rooms.get(normalizeRoomId(roomId));
         if (!room) return;
 
         handleHigherOrLowerSelectStack(room, playerId, stackIndex);
 
-        io.to(room.id).emit("room-updated", room);
+        emitRoomUpdated(io, room);
       }
     );
 
     socket.on("higher-or-lower-guess", ({ roomId, playerId, choice }) => {
-      const room = rooms.get(roomId?.toUpperCase());
+      const room = rooms.get(normalizeRoomId(roomId));
       if (!room) return;
 
       handleHigherOrLowerGuess(room, playerId, choice);
 
-      io.to(room.id).emit("room-updated", room);
+      emitRoomUpdated(io, room);
     });
 
     socket.on("higher-or-lower-restart", ({ roomId, playerId }) => {
-      const room = rooms.get(roomId?.toUpperCase());
+      const room = rooms.get(normalizeRoomId(roomId));
       if (!room) return;
 
       restartHigherOrLower(room, playerId);
 
-      io.to(room.id).emit("room-updated", room);
+      emitRoomUpdated(io, room);
     });
 
     socket.on("horse-bet", ({ roomId, playerId, suit, amount }) => {
-      const room = rooms.get(roomId?.toUpperCase());
+      const room = rooms.get(normalizeRoomId(roomId));
       if (!room) return;
 
       handleHorseBet(room, playerId, suit, amount);
 
-      io.to(room.id).emit("room-updated", room);
+      emitRoomUpdated(io, room);
     });
 
     socket.on("horse-start", ({ roomId, playerId }) => {
-      const room = rooms.get(roomId?.toUpperCase());
+      const room = rooms.get(normalizeRoomId(roomId));
       if (!room) return;
 
       startHorseRace(room, playerId);
 
-      io.to(room.id).emit("room-updated", room);
+      emitRoomUpdated(io, room);
     });
 
     socket.on("horse-step", ({ roomId }) => {
-      const room = rooms.get(roomId?.toUpperCase());
+      const room = rooms.get(normalizeRoomId(roomId));
       if (!room) return;
 
       stepHorseRace(room);
 
-      io.to(room.id).emit("room-updated", room);
+      emitRoomUpdated(io, room);
     });
 
     socket.on("horse-auto-start", ({ roomId, speed }) => {
-      const room = rooms.get(roomId?.toUpperCase());
+      const room = rooms.get(normalizeRoomId(roomId));
       if (!room) return;
 
       startAutoRace(room, speed, io);
     });
 
     socket.on("horse-auto-stop", ({ roomId }) => {
-      const room = rooms.get(roomId?.toUpperCase());
+      const room = rooms.get(normalizeRoomId(roomId));
       if (!room) return;
 
       stopAutoRace(room);
     });
 
     socket.on("horse-assign-drinks", ({ roomId, playerId, assignments }) => {
-      const room = rooms.get(roomId?.toUpperCase());
+      const room = rooms.get(normalizeRoomId(roomId));
       if (!room) return;
 
       const game = room.gameState;
@@ -804,11 +928,11 @@ app.prepare().then(() => {
 
       game.drinkAssignments[playerId] = assignments || {};
 
-      io.to(room.id).emit("room-updated", room);
+      emitRoomUpdated(io, room);
     });
 
     socket.on("horse-finish-assignments", ({ roomId, playerId }) => {
-      const room = rooms.get(roomId?.toUpperCase());
+      const room = rooms.get(normalizeRoomId(roomId));
       if (!room) return;
 
       const game = room.gameState;
@@ -825,11 +949,11 @@ app.prepare().then(() => {
         game.message = "Results ready!";
       }
 
-      io.to(room.id).emit("room-updated", room);
+      emitRoomUpdated(io, room);
     });
 
     socket.on("horse-restart", ({ roomId, playerId }) => {
-      const room = rooms.get(roomId?.toUpperCase());
+      const room = rooms.get(normalizeRoomId(roomId));
       if (!room) return;
 
       const player = room.players.find((p) => p.id === playerId);
@@ -838,11 +962,28 @@ app.prepare().then(() => {
       stopAutoRace(room);
       room.gameState = createHorseRacingState();
 
-      io.to(room.id).emit("room-updated", room);
+      emitRoomUpdated(io, room);
     });
 
     socket.on("disconnect", () => {
       console.log("User disconnected:", socket.id);
+
+      rooms.forEach((room) => {
+        let changed = false;
+
+        room.players.forEach((player) => {
+          const before = player.socketIds?.length || 0;
+          removeSocketFromPlayer(player, socket.id);
+
+          if ((player.socketIds?.length || 0) !== before) {
+            changed = true;
+          }
+        });
+
+        if (changed) {
+          emitRoomUpdated(io, room);
+        }
+      });
     });
   });
 
