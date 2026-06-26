@@ -15,6 +15,7 @@ type Player = {
   name: string;
   isHost?: boolean;
   penalties: number;
+  connected?: boolean;
 };
 
 type HigherOrLowerState = {
@@ -53,6 +54,7 @@ export default function HigherOrLowerPage() {
     const params = new URLSearchParams(window.location.search);
     const urlRoomId = params.get("roomId")?.toUpperCase() || "";
     const savedPlayerId = localStorage.getItem("playerId") || "";
+    const savedName = localStorage.getItem("playerName") || "";
 
     setRoomId(urlRoomId);
     setMyPlayerId(savedPlayerId);
@@ -61,12 +63,34 @@ export default function HigherOrLowerPage() {
 
     socket.on("connect", () => {
       if (urlRoomId) {
-        socket.emit("request-room-state", { roomId: urlRoomId });
+        if (!savedPlayerId && !savedName) {
+          window.location.href = `/rooms/${urlRoomId}`;
+          return;
+        }
+
+        socket.emit("request-room-state", {
+          roomId: urlRoomId,
+          playerId: savedPlayerId,
+          name: savedName,
+        });
+      }
+    });
+
+    socket.on("join-denied", ({ message }) => {
+      alert(message || "Unable to rejoin this game.");
+      if (urlRoomId) {
+        window.location.href = `/rooms/${urlRoomId}`;
       }
     });
 
     socket.on("return-to-room", ({ roomId }) => {
       window.location.href = `/rooms/${roomId}`;
+    });
+
+    socket.on("player-joined", ({ playerId, name }) => {
+      localStorage.setItem("playerId", playerId);
+      localStorage.setItem("playerName", name);
+      setMyPlayerId(playerId);
     });
 
     socket.on("room-updated", (updatedRoom: Room) => {

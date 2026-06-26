@@ -9,6 +9,7 @@ type Player = {
   isHost: boolean;
   ready: boolean;
   drinks?: number;
+  connected?: boolean;
 };
 
 type Room = {
@@ -52,6 +53,13 @@ export default function RoomPage({ params }: RoomPageProps) {
     setMyPlayerId(savedPlayerId);
     setName(savedName);
 
+    socket.on("player-joined", ({ playerId, name }) => {
+      localStorage.setItem("playerId", playerId);
+      localStorage.setItem("playerName", name);
+      setMyPlayerId(playerId);
+      setName(name);
+    });
+
     socket.on("room-updated", (updatedRoom: Room) => {
       setRoom(updatedRoom);
       setJoined(true);
@@ -62,6 +70,10 @@ export default function RoomPage({ params }: RoomPageProps) {
       setMessage("This room is full. Max 12 players allowed.");
     });
 
+    socket.on("join-denied", ({ message }) => {
+      setMessage(message || "Unable to join this room.");
+    });
+
     socket.on("game-started", ({ game, roomId }) => {
       window.location.href = `/games/${game}?roomId=${roomId}`;
     });
@@ -70,6 +82,21 @@ export default function RoomPage({ params }: RoomPageProps) {
       socket.disconnect();
     };
   }, []);
+
+  useEffect(() => {
+    if (!roomId || joined || !socket) return;
+
+    const savedPlayerId = localStorage.getItem("playerId") || "";
+    const savedName = localStorage.getItem("playerName") || "";
+
+    if (savedPlayerId && savedName) {
+      socket.emit("join-room", {
+        roomId,
+        name: savedName,
+        playerId: savedPlayerId,
+      });
+    }
+  }, [roomId, joined]);
 
   function getOrCreatePlayerId() {
     let playerId = localStorage.getItem("playerId");
@@ -170,7 +197,7 @@ export default function RoomPage({ params }: RoomPageProps) {
                     className="bg-gray-800 rounded-lg px-4 py-3 flex justify-between"
                   >
                     <span>
-                      {player.name} {player.isHost ? "👑" : ""}
+                      {player.name} {player.isHost ? "👑" : ""} {player.connected === false ? "🔌" : ""}
                     </span>
 
                     <span>{player.ready ? "Ready ✅" : "Not Ready"}</span>
