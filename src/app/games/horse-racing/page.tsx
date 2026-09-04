@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { io, Socket } from "socket.io-client";
+import { loadPlayerSession, savePlayerSession } from "@/lib/player-session";
 
 type Card = {
   suit: string;
@@ -163,15 +164,15 @@ export default function HorseRacingPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const urlRoomId = params.get("roomId")?.toUpperCase() || "";
-    const savedPlayerId = localStorage.getItem("playerId") || "";
-    const savedName = localStorage.getItem("playerName") || "";
-
-    setRoomId(urlRoomId);
-    setMyPlayerId(savedPlayerId);
+    const { playerId: savedPlayerId, name: savedName } =
+      loadPlayerSession(urlRoomId);
 
     socket = io();
 
     socket.on("connect", () => {
+      setRoomId(urlRoomId);
+      setMyPlayerId(savedPlayerId);
+
       if (urlRoomId) {
         if (!savedPlayerId && !savedName) {
           window.location.href = `/rooms/${urlRoomId}`;
@@ -187,13 +188,16 @@ export default function HorseRacingPage() {
     });
 
     socket.on("player-joined", ({ playerId, name }) => {
-      localStorage.setItem("playerId", playerId);
-      localStorage.setItem("playerName", name);
+      savePlayerSession(urlRoomId, playerId, name);
       setMyPlayerId(playerId);
     });
 
     socket.on("room-updated", (updatedRoom: Room) => {
       setRoom(updatedRoom);
+
+      if (updatedRoom.gameState?.phase === "betting") {
+        setDrinkAssignments({});
+      }
 
       if (updatedRoom.gameState?.phase !== "racing") {
         setIsAuto(false);
@@ -219,12 +223,6 @@ export default function HorseRacingPage() {
   const game = room?.gameState;
   const me = room?.players.find((player) => player.id === myPlayerId);
   const isHost = me?.isHost;
-
-  useEffect(() => {
-    if (game?.phase === "betting") {
-      setDrinkAssignments({});
-    }
-  }, [game?.phase]);
 
   const results = useMemo(() => {
     if (!room || !game || game.phase !== "assigning") return [];
@@ -343,14 +341,27 @@ export default function HorseRacingPage() {
     setIsAuto(false);
   }
 
-  function updateAssignment(receiverId: string, value: number) {
-    setDrinkAssignments((prev) => ({
-      ...prev,
-      [myPlayerId]: {
-        ...prev[myPlayerId],
-        [receiverId]: Math.max(0, value),
-      },
-    }));
+  function updateAssignment(receiverId: string, value: string) {
+    setDrinkAssignments((prev) => {
+      const nextAssignments = { ...(prev[myPlayerId] || {}) };
+
+      if (value === "") {
+        delete nextAssignments[receiverId];
+      } else {
+        const amount = Math.max(0, Math.floor(Number(value) || 0));
+
+        if (amount === 0) {
+          delete nextAssignments[receiverId];
+        } else {
+          nextAssignments[receiverId] = amount;
+        }
+      }
+
+      return {
+        ...prev,
+        [myPlayerId]: nextAssignments,
+      };
+    });
   }
 
   function totalAssigned(giverId: string) {
@@ -365,10 +376,16 @@ export default function HorseRacingPage() {
       (result) => result.player.id === myPlayerId && result.type === "give"
     );
 
+    const positiveAssignments = Object.fromEntries(
+      Object.entries(drinkAssignments[myPlayerId] || {}).filter(
+        ([, amount]) => amount > 0
+      )
+    );
+
     socket.emit("horse-assign-drinks", {
       roomId,
       playerId: myPlayerId,
-      assignments: myGiveResult ? drinkAssignments[myPlayerId] || {} : {},
+      assignments: myGiveResult ? positiveAssignments : {},
     });
 
     socket.emit("horse-finish-assignments", {
@@ -386,7 +403,7 @@ export default function HorseRacingPage() {
 
   if (!room || !game) {
     return (
-      <main className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
+      <main className="app-shell flex items-center justify-center">
         Loading Horse Racing...
       </main>
     );
@@ -394,18 +411,24 @@ export default function HorseRacingPage() {
 
   const deckCount = game.deck?.length ?? 0;
   const reshuffleCount = game.reshuffleCount ?? 0;
+  const myAssignmentTotal = totalAssigned(myPlayerId);
+  const hasTooManyAssignments =
+    myResult?.type === "give" && myAssignmentTotal > myResult.amount;
+  const myCurrentBet = game.bets[myPlayerId];
+  const isCurrentBetSaved =
+    myCurrentBet?.suit === selectedSuit && myCurrentBet?.amount === betAmount;
 
   return (
-    <main className="min-h-screen bg-gray-950 text-white p-6">
+    <main className="app-shell p-4 sm:p-6">
       <div className="max-w-7xl mx-auto flex flex-col gap-6 items-center">
-        <h1 className="text-5xl font-bold">🐎 Horse Racing</h1>
+        <h1 className="text-4xl font-black sm:text-5xl">🐎 Horse Racing</h1>
 
         <div className="text-center">
           <p className="text-gray-400">Room: {room.id}</p>
         </div>
 
         {game.phase === "betting" && (
-          <section className="bg-gray-900 p-6 rounded-xl flex flex-col gap-4 w-full max-w-md">
+          <section className="panel p-6 flex flex-col gap-4 w-full max-w-md">
             <h2 className="text-2xl font-bold text-center">Place Your Bet</h2>
 
             <label className="flex flex-col gap-2">
@@ -417,6 +440,7 @@ export default function HorseRacingPage() {
                     key={suit}
                     type="button"
                     onClick={() => setSelectedSuit(suit)}
+                    aria-pressed={selectedSuit === suit}
                     className={`px-4 py-3 text-2xl font-bold rounded-xl border-4 ${
                       selectedSuit === suit
                         ? "bg-yellow-500 text-black border-yellow-300"
@@ -452,9 +476,13 @@ export default function HorseRacingPage() {
 
             <button
               onClick={placeBet}
-              className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded"
+              className={`px-4 py-3 rounded-xl font-bold ${
+                isCurrentBetSaved
+                  ? "ready-button"
+                  : "primary-button"
+              }`}
             >
-              Place Bet
+              {isCurrentBetSaved ? "✓ Bet Placed" : "Place Bet"}
             </button>
 
             {isHost && (
@@ -660,7 +688,7 @@ export default function HorseRacingPage() {
         )}
 
         {game.phase === "assigning" && (
-          <section className="bg-gray-900 p-6 rounded-xl w-full max-w-3xl">
+          <section className="panel p-6 w-full max-w-3xl">
             <h2 className="text-2xl font-bold mb-4 text-center">
               Assign Drinks
             </h2>
@@ -698,7 +726,7 @@ export default function HorseRacingPage() {
                     result.type === "give" && (
                       <div className="mt-4 bg-gray-900 rounded-lg p-3">
                         <p className="font-bold mb-2">
-                          Assign drinks: {totalAssigned(myPlayerId)} /{" "}
+                          Assign drinks: {myAssignmentTotal} /{" "}
                           {result.amount}
                         </p>
 
@@ -715,24 +743,24 @@ export default function HorseRacingPage() {
                                   type="number"
                                   min={0}
                                   max={result.amount}
-                                  value={
-                                    drinkAssignments[myPlayerId]?.[
-                                      receiver.id
-                                    ] || 0
-                                  }
+                                  step={1}
+                                  inputMode="numeric"
+                                  placeholder="0"
+                                  value={drinkAssignments[myPlayerId]?.[receiver.id] ?? ""}
                                   onChange={(e) =>
                                     updateAssignment(
                                       receiver.id,
-                                      Number(e.target.value)
+                                      e.target.value
                                     )
                                   }
-                                  className="bg-gray-800 text-white rounded px-2 py-1 w-20"
+                                  disabled={hasFinishedAssignments}
+                                  className="field w-24 rounded-lg px-3 py-2 text-right font-bold"
                                 />
                               </label>
                             ))}
                         </div>
 
-                        {totalAssigned(myPlayerId) > result.amount && (
+                        {hasTooManyAssignments && (
                           <p className="text-red-400 mt-2">
                             Too many drinks assigned.
                           </p>
@@ -745,23 +773,49 @@ export default function HorseRacingPage() {
 
             <button
               onClick={submitAssignments}
-              disabled={hasFinishedAssignments}
-              className="mt-6 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 px-6 py-3 rounded-xl font-bold w-full"
+              disabled={hasFinishedAssignments || hasTooManyAssignments}
+              className="primary-button mt-6 w-full px-6 py-3 font-bold"
             >
               {hasFinishedAssignments
-                ? "Assignments Finished"
+                ? "✓ Assignments Finished"
                 : "Finish My Assignments"}
             </button>
 
-            <p className="text-sm text-gray-400 mt-2 text-center">
-              Finished players: {game.finishedAssigners?.length || 0} /{" "}
-              {room.players.length}
-            </p>
+            <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="font-bold">Assignment status</h3>
+                <span className="text-sm text-slate-400">
+                  {game.finishedAssigners?.length || 0} / {room.players.length}
+                </span>
+              </div>
+
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {room.players.map((player) => {
+                  const isFinished = game.finishedAssigners?.includes(player.id);
+
+                  return (
+                    <div
+                      key={player.id}
+                      className="flex items-center justify-between gap-3 rounded-lg bg-white/5 px-3 py-2"
+                    >
+                      <span className="truncate text-sm font-semibold">
+                        {player.name} {player.id === myPlayerId ? "(You)" : ""}
+                      </span>
+                      <span className={`shrink-0 text-xs font-bold ${
+                        isFinished ? "text-emerald-300" : "text-amber-200"
+                      }`}>
+                        {isFinished ? "✓ Final" : "Choosing…"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </section>
         )}
 
         {game.phase === "results" && (
-          <section className="bg-gray-900 p-6 rounded-xl w-full max-w-3xl">
+          <section className="panel p-6 w-full max-w-3xl">
             <h2 className="text-2xl font-bold mb-4 text-center">
               Final Drink Results
             </h2>
@@ -782,7 +836,7 @@ export default function HorseRacingPage() {
                       <p>{result.raceLoss} from loss of race</p>
                     )}
 
-                    {Object.entries(result?.from || {}).map(
+                    {Object.entries(result?.from || {}).filter(([, amount]) => amount > 0).map(
                       ([giver, amount]) => (
                         <p key={giver}>
                           {amount} from {giver}
