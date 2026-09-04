@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #07110f;
+  --foreground: #f8fafc;
 }
 
 @theme inline {
@@ -12,15 +12,139 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:not(:disabled) {
+  cursor: pointer;
+  transition:
+    transform 140ms ease,
+    filter 140ms ease,
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    opacity 140ms ease;
+}
+
+button:not(:disabled):hover {
+  filter: brightness(1.08);
+}
+
+button:not(:disabled):active {
+  transform: translateY(2px) scale(0.985);
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 3px solid rgba(253, 224, 71, 0.85);
+  outline-offset: 3px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.35);
+  opacity: 0.5;
+}
+
+::selection {
+  background: rgba(52, 211, 153, 0.35);
+  color: white;
+}
+
+.app-shell {
+  min-height: 100svh;
+  color: #f8fafc;
+  background:
+    radial-gradient(circle at 15% 0%, rgba(16, 185, 129, 0.14), transparent 32rem),
+    radial-gradient(circle at 90% 12%, rgba(245, 158, 11, 0.1), transparent 28rem),
+    linear-gradient(155deg, #07110f 0%, #080d17 48%, #11100b 100%);
+}
+
+.panel {
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 1.5rem;
+  background: rgba(15, 23, 42, 0.76);
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(18px);
+}
+
+.field {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 0.9rem;
+  background: rgba(2, 6, 23, 0.78);
+  color: #f8fafc;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.field::placeholder {
+  color: #64748b;
+}
+
+.field:focus {
+  border-color: rgba(52, 211, 153, 0.7);
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.09);
+}
+
+.primary-button,
+.secondary-button,
+.ready-button,
+.danger-icon-button {
+  border-radius: 0.9rem;
+}
+
+.primary-button {
+  border: 1px solid rgba(110, 231, 183, 0.45);
+  background: linear-gradient(135deg, #059669, #047857);
+  color: white;
+  box-shadow: 0 10px 30px rgba(5, 150, 105, 0.2);
+}
+
+.secondary-button {
+  border: 1px solid rgba(125, 211, 252, 0.35);
+  background: rgba(14, 116, 144, 0.55);
+  color: white;
+}
+
+.ready-button {
+  border: 1px solid rgba(253, 224, 71, 0.5);
+  background: linear-gradient(135deg, #facc15, #f59e0b);
+  color: #1c1917;
+  box-shadow: 0 10px 30px rgba(245, 158, 11, 0.2);
+}
+
+.danger-icon-button {
+  border: 1px solid rgba(251, 113, 133, 0.28);
+  background: rgba(244, 63, 94, 0.11);
+  color: #fda4af;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }

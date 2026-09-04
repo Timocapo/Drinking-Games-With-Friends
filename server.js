@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 const { createServer } = require("http");
 const next = require("next");
 const { Server } = require("socket.io");
@@ -116,6 +117,22 @@ function syncPlayerConnection(room, socket, player, name) {
 
 function emitRoomUpdated(io, room) {
   io.to(room.id).emit("room-updated", room);
+}
+
+function getConnectedPlayer(room, socket, playerId) {
+  return room.players.find(
+    (player) =>
+      player.id === playerId && player.socketIds?.includes(socket.id)
+  );
+}
+
+function sendPlayerToActiveGame(socket, room) {
+  if (!room.game || !room.gameState) return;
+
+  socket.emit("game-started", {
+    game: room.game,
+    roomId: room.id,
+  });
 }
 
 function createDeck() {
@@ -617,7 +634,7 @@ function calculateHorseResults(room) {
     Object.entries(targets).forEach(([targetId, amount]) => {
       const drinkAmount = Number(amount) || 0;
 
-      if (!results[targetId]) return;
+      if (!results[targetId] || drinkAmount <= 0) return;
 
       results[targetId].total += drinkAmount;
       results[targetId].from[giver.name] =
@@ -626,6 +643,40 @@ function calculateHorseResults(room) {
   });
 
   game.finalDrinks = results;
+}
+
+function getHorseGiveAllowance(room, playerId) {
+  const game = room.gameState;
+  const bet = game?.bets?.[playerId];
+  if (!bet) return 0;
+
+  const finishIndex = game.finishOrder.indexOf(bet.suit);
+  if (finishIndex === 0) return bet.amount * 2;
+  if (finishIndex === 1) return bet.amount;
+  return 0;
+}
+
+function sanitizeHorseAssignments(room, playerId, assignments) {
+  const validTargetIds = new Set(
+    room.players
+      .filter((player) => player.id !== playerId)
+      .map((player) => player.id)
+  );
+  let remaining = getHorseGiveAllowance(room, playerId);
+  const sanitized = {};
+
+  Object.entries(assignments || {}).forEach(([targetId, rawAmount]) => {
+    if (!validTargetIds.has(targetId) || remaining <= 0) return;
+
+    const requestedAmount = Math.floor(Number(rawAmount));
+    if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) return;
+
+    const amount = Math.min(requestedAmount, remaining);
+    sanitized[targetId] = amount;
+    remaining -= amount;
+  });
+
+  return sanitized;
 }
 
 function startAutoRace(room, speed = 1000, io) {
@@ -726,26 +777,93 @@ app.prepare().then(() => {
       syncPlayerConnection(room, socket, player, cleanName);
       emitRoomUpdated(io, room);
 
-      if (room.game && room.gameState) {
-        socket.emit("game-started", {
-          game: room.game,
-          roomId: room.id,
-        });
-      }
+      sendPlayerToActiveGame(socket, room);
     });
 
-    socket.on("toggle-ready", ({ roomId, playerId }) => {
+    socket.on("rejoin-room", ({ roomId, name, playerId }) => {
       const room = rooms.get(normalizeRoomId(roomId));
-      if (!room) return;
 
-      room.players = room.players.map((player) =>
-        player.id === playerId
-          ? { ...player, ready: !player.ready }
-          : player
-      );
+      if (!room) {
+        socket.emit("rejoin-unavailable");
+        return;
+      }
+
+      const player = findPlayerForJoin(room, playerId, name);
+
+      if (!player) {
+        socket.emit("rejoin-unavailable");
+        return;
+      }
+
+      syncPlayerConnection(room, socket, player, name);
+      emitRoomUpdated(io, room);
+      sendPlayerToActiveGame(socket, room);
+    });
+
+    socket.on("toggle-ready", ({ roomId, playerId }, acknowledge) => {
+      const room = rooms.get(normalizeRoomId(roomId));
+      if (!room) {
+        acknowledge?.({ ok: false, message: "Room not found." });
+        return;
+      }
+
+      const player = getConnectedPlayer(room, socket, playerId);
+      if (!player || hasActiveGame(room)) {
+        acknowledge?.({ ok: false, message: "Ready status cannot be changed." });
+        return;
+      }
+
+      player.ready = !player.ready;
 
       emitRoomUpdated(io, room);
+      acknowledge?.({ ok: true, ready: player.ready });
     });
+
+    socket.on(
+      "remove-player",
+      ({ roomId, playerId, targetPlayerId }, acknowledge) => {
+        const room = rooms.get(normalizeRoomId(roomId));
+
+        if (!room) {
+          acknowledge?.({ ok: false, message: "Room not found." });
+          return;
+        }
+
+        const host = getConnectedPlayer(room, socket, playerId);
+        if (!host?.isHost || hasActiveGame(room)) {
+          acknowledge?.({
+            ok: false,
+            message: "Only the host can remove players before the game starts.",
+          });
+          return;
+        }
+
+        const target = room.players.find(
+          (player) => player.id === targetPlayerId
+        );
+
+        if (!target || target.isHost) {
+          acknowledge?.({ ok: false, message: "That player cannot be removed." });
+          return;
+        }
+
+        room.players = room.players.filter(
+          (player) => player.id !== targetPlayerId
+        );
+
+        (target.socketIds || []).forEach((socketId) => {
+          const targetSocket = io.sockets.sockets.get(socketId);
+          targetSocket?.emit("removed-from-room", {
+            roomId: room.id,
+            playerId: target.id,
+          });
+          targetSocket?.leave(room.id);
+        });
+
+        emitRoomUpdated(io, room);
+        acknowledge?.({ ok: true });
+      }
+    );
 
     socket.on("select-game", ({ roomId, playerId, game }) => {
       const room = rooms.get(normalizeRoomId(roomId));
@@ -833,8 +951,9 @@ app.prepare().then(() => {
         syncPlayerConnection(room, socket, player, name);
         emitRoomUpdated(io, room);
       } else {
-        socket.join(room.id);
-        socket.emit("room-updated", room);
+        socket.emit("join-denied", {
+          message: "We could not reconnect you. Please join the room again.",
+        });
       }
     });
 
@@ -925,8 +1044,13 @@ app.prepare().then(() => {
       const game = room.gameState;
       if (!game || game.type !== "horse-racing") return;
       if (game.phase !== "assigning") return;
+      if (!getConnectedPlayer(room, socket, playerId)) return;
 
-      game.drinkAssignments[playerId] = assignments || {};
+      game.drinkAssignments[playerId] = sanitizeHorseAssignments(
+        room,
+        playerId,
+        assignments
+      );
 
       emitRoomUpdated(io, room);
     });
@@ -938,6 +1062,7 @@ app.prepare().then(() => {
       const game = room.gameState;
       if (!game || game.type !== "horse-racing") return;
       if (game.phase !== "assigning") return;
+      if (!getConnectedPlayer(room, socket, playerId)) return;
 
       if (!game.finishedAssigners.includes(playerId)) {
         game.finishedAssigners.push(playerId);

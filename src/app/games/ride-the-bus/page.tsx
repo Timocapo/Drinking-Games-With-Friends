@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { io, Socket } from "socket.io-client";
+import { loadPlayerSession, savePlayerSession } from "@/lib/player-session";
 
 type Suit = "♥" | "♦" | "♠" | "♣";
 type Color = "Red" | "Black";
@@ -70,15 +71,15 @@ export default function RideTheBusPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const urlRoomId = params.get("roomId")?.toUpperCase() || "";
-    const savedPlayerId = localStorage.getItem("playerId") || "";
-    const savedName = localStorage.getItem("playerName") || "";
-
-    setRoomId(urlRoomId);
-    setMyPlayerId(savedPlayerId);
+    const { playerId: savedPlayerId, name: savedName } =
+      loadPlayerSession(urlRoomId);
 
     socket = io();
 
     socket.on("connect", () => {
+      setRoomId(urlRoomId);
+      setMyPlayerId(savedPlayerId);
+
       if (urlRoomId) {
         if (!savedPlayerId && !savedName) {
           window.location.href = `/rooms/${urlRoomId}`;
@@ -94,8 +95,7 @@ export default function RideTheBusPage() {
     });
 
     socket.on("player-joined", ({ playerId, name }) => {
-      localStorage.setItem("playerId", playerId);
-      localStorage.setItem("playerName", name);
+      savePlayerSession(urlRoomId, playerId, name);
       setMyPlayerId(playerId);
     });
 
@@ -131,7 +131,7 @@ export default function RideTheBusPage() {
 
   if (!roomId) {
     return (
-      <main className="min-h-screen bg-gray-950 text-white p-6 flex items-center justify-center">
+      <main className="app-shell p-6 flex items-center justify-center">
         <div className="bg-gray-900 rounded-xl p-6 text-center">
           <h1 className="text-3xl font-bold mb-2">Ride The Bus</h1>
           <p className="text-gray-300">
@@ -144,7 +144,7 @@ export default function RideTheBusPage() {
 
   if (!room || !room.gameState) {
     return (
-      <main className="min-h-screen bg-gray-950 text-white p-6 flex items-center justify-center">
+      <main className="app-shell p-6 flex items-center justify-center">
         <div className="bg-gray-900 rounded-xl p-6 text-center">
           <h1 className="text-3xl font-bold mb-2">Loading Ride The Bus...</h1>
           <p className="text-gray-300">Room Code: {roomId}</p>
@@ -166,9 +166,9 @@ export default function RideTheBusPage() {
   const isMyTurn = currentPlayer?.id === myPlayerId;
 
   return (
-    <main className="min-h-screen bg-gray-950 text-white p-6">
+    <main className="app-shell p-4 sm:p-6">
       <div className="max-w-4xl mx-auto flex flex-col items-center gap-6">
-        <h1 className="text-5xl font-bold">🚌 Ride The Bus</h1>
+        <h1 className="text-center text-4xl font-black sm:text-5xl">🚌 Ride The Bus</h1>
 
         <div className="text-center">
           <p className="text-sm text-gray-400">Room: {room.id}</p>
@@ -284,4 +284,3 @@ export default function RideTheBusPage() {
     </main>
   );
 }
-

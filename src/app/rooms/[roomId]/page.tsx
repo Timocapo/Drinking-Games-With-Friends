@@ -2,6 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { io, Socket } from "socket.io-client";
+import {
+  clearPlayerSession,
+  consumeFreshJoin,
+  loadPlayerSession,
+  savePlayerSession,
+} from "@/lib/player-session";
 
 type Player = {
   id: string;
@@ -19,6 +25,35 @@ type Room = {
   game: string | null;
 };
 
+type ActionResponse = {
+  ok: boolean;
+  message?: string;
+};
+
+const GAME_OPTIONS = [
+  {
+    id: "higher-or-lower",
+    title: "Higher or Lower",
+    icon: "↕",
+    description: "Build a streak without hitting a bad card.",
+    accent: "from-sky-500/25 to-sky-500/5 border-sky-400/40",
+  },
+  {
+    id: "ride-the-bus",
+    title: "Ride The Bus",
+    icon: "🚌",
+    description: "Four questions, one unforgiving deck.",
+    accent: "from-rose-500/25 to-rose-500/5 border-rose-400/40",
+  },
+  {
+    id: "horse-racing",
+    title: "Horse Racing",
+    icon: "♞",
+    description: "Back a suit and watch the race unfold.",
+    accent: "from-violet-500/25 to-violet-500/5 border-violet-400/40",
+  },
+];
+
 let socket: Socket;
 
 interface RoomPageProps {
@@ -34,6 +69,8 @@ export default function RoomPage({ params }: RoomPageProps) {
   const [room, setRoom] = useState<Room | null>(null);
   const [message, setMessage] = useState("");
   const [myPlayerId, setMyPlayerId] = useState("");
+  const [readyPending, setReadyPending] = useState(false);
+  const [removingPlayerId, setRemovingPlayerId] = useState("");
 
   useEffect(() => {
     async function loadParams() {
@@ -47,15 +84,11 @@ export default function RoomPage({ params }: RoomPageProps) {
   useEffect(() => {
     socket = io();
 
-    const savedPlayerId = localStorage.getItem("playerId") || "";
-    const savedName = localStorage.getItem("playerName") || "";
+    socket.on("player-joined", ({ roomId: joinedRoomId, playerId, name }) => {
+      if (joinedRoomId) {
+        savePlayerSession(joinedRoomId, playerId, name);
+      }
 
-    setMyPlayerId(savedPlayerId);
-    setName(savedName);
-
-    socket.on("player-joined", ({ playerId, name }) => {
-      localStorage.setItem("playerId", playerId);
-      localStorage.setItem("playerName", name);
       setMyPlayerId(playerId);
       setName(name);
     });
@@ -63,6 +96,8 @@ export default function RoomPage({ params }: RoomPageProps) {
     socket.on("room-updated", (updatedRoom: Room) => {
       setRoom(updatedRoom);
       setJoined(true);
+      setReadyPending(false);
+      setRemovingPlayerId("");
       setMessage("");
     });
 
@@ -70,12 +105,26 @@ export default function RoomPage({ params }: RoomPageProps) {
       setMessage("This room is full. Max 12 players allowed.");
     });
 
-    socket.on("join-denied", ({ message }) => {
-      setMessage(message || "Unable to join this room.");
+    socket.on("join-denied", ({ message: denialMessage }) => {
+      setMessage(denialMessage || "Unable to join this room.");
     });
 
-    socket.on("game-started", ({ game, roomId }) => {
-      window.location.href = `/games/${game}?roomId=${roomId}`;
+    socket.on("rejoin-unavailable", () => {
+      setJoined(false);
+      setRoom(null);
+    });
+
+    socket.on("removed-from-room", ({ roomId: removedRoomId, playerId }) => {
+      clearPlayerSession(removedRoomId, playerId);
+      setJoined(false);
+      setRoom(null);
+      setMyPlayerId("");
+      setName("");
+      setMessage("The host removed you from this room.");
+    });
+
+    socket.on("game-started", ({ game, roomId: startedRoomId }) => {
+      window.location.href = `/games/${game}?roomId=${startedRoomId}`;
     });
 
     return () => {
@@ -86,37 +135,32 @@ export default function RoomPage({ params }: RoomPageProps) {
   useEffect(() => {
     if (!roomId || joined || !socket) return;
 
-    const savedPlayerId = localStorage.getItem("playerId") || "";
-    const savedName = localStorage.getItem("playerName") || "";
+    if (consumeFreshJoin(roomId)) {
+      return;
+    }
 
-    if (savedPlayerId && savedName) {
-      socket.emit("join-room", {
+    const savedSession = loadPlayerSession(roomId);
+
+    if (savedSession.playerId && savedSession.name) {
+      socket.emit("rejoin-room", {
         roomId,
-        name: savedName,
-        playerId: savedPlayerId,
+        name: savedSession.name,
+        playerId: savedSession.playerId,
       });
     }
   }, [roomId, joined]);
 
-  function getOrCreatePlayerId() {
-    let playerId = localStorage.getItem("playerId");
-
-    if (!playerId) {
-      playerId = crypto.randomUUID();
-      localStorage.setItem("playerId", playerId);
-    }
-
-    setMyPlayerId(playerId);
-    return playerId;
-  }
+  const currentPlayer = room?.players.find(
+    (player) => player.id === myPlayerId
+  );
 
   function joinRoom() {
-    if (!roomId) return;
+    const playerName = name.trim();
+    if (!roomId || !playerName) return;
 
-    const playerId = getOrCreatePlayerId();
-    const playerName = name.trim() || "Guest";
-
-    localStorage.setItem("playerName", playerName);
+    const playerId = crypto.randomUUID();
+    setMyPlayerId(playerId);
+    setMessage("");
 
     socket.emit("join-room", {
       roomId,
@@ -126,10 +170,33 @@ export default function RoomPage({ params }: RoomPageProps) {
   }
 
   function toggleReady() {
-    socket.emit("toggle-ready", {
-      roomId,
-      playerId: myPlayerId,
-    });
+    if (!currentPlayer || readyPending) return;
+
+    setReadyPending(true);
+    setRoom((currentRoom) =>
+      currentRoom
+        ? {
+            ...currentRoom,
+            players: currentRoom.players.map((player) =>
+              player.id === myPlayerId
+                ? { ...player, ready: !player.ready }
+                : player
+            ),
+          }
+        : currentRoom
+    );
+
+    socket.timeout(3000).emit(
+      "toggle-ready",
+      { roomId, playerId: myPlayerId },
+      (error: Error | null, response?: ActionResponse) => {
+        setReadyPending(false);
+
+        if (error || !response?.ok) {
+          setMessage(response?.message || "Could not update your ready status.");
+        }
+      }
+    );
   }
 
   function selectGame(game: string) {
@@ -147,117 +214,249 @@ export default function RoomPage({ params }: RoomPageProps) {
     });
   }
 
-  const currentPlayer = room?.players.find(
-    (player) => player.id === myPlayerId
-  );
+  function removePlayer(targetPlayer: Player) {
+    if (removingPlayerId) return;
+
+    const shouldRemove = window.confirm(
+      `Remove ${targetPlayer.name} from the waiting room?`
+    );
+
+    if (!shouldRemove) return;
+
+    setRemovingPlayerId(targetPlayer.id);
+    setMessage("");
+
+    socket.timeout(3000).emit(
+      "remove-player",
+      {
+        roomId,
+        playerId: myPlayerId,
+        targetPlayerId: targetPlayer.id,
+      },
+      (error: Error | null, response?: ActionResponse) => {
+        setRemovingPlayerId("");
+
+        if (error || !response?.ok) {
+          setMessage(response?.message || "Could not remove that player.");
+        }
+      }
+    );
+  }
+
   const isHost = currentPlayer?.isHost;
+  const readyCount = room?.players.filter((player) => player.ready).length || 0;
+  const selectedGame = GAME_OPTIONS.find((game) => game.id === room?.game);
 
   return (
-    <main className="min-h-screen bg-gray-950 text-white p-6">
-      <div className="max-w-3xl mx-auto flex flex-col gap-6">
-        <h1 className="text-4xl font-bold text-center">Room Code: {roomId}</h1>
+    <main className="app-shell p-5 sm:p-8">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+        <header className="text-center">
+          <p className="text-xs font-bold uppercase tracking-[0.3em] text-emerald-300">
+            Waiting room
+          </p>
+          <h1 className="mt-2 text-3xl font-black sm:text-5xl">
+            Room <span className="text-amber-300">{roomId}</span>
+          </h1>
+          <p className="mt-2 text-sm text-slate-400">
+            Share this code with your friends.
+          </p>
+        </header>
 
         {!joined && (
-          <section className="bg-gray-900 rounded-xl p-6 flex flex-col gap-4">
-            <h2 className="text-2xl font-bold">Join Room</h2>
+          <section className="panel mx-auto w-full max-w-lg p-6 sm:p-8">
+            <p className="mb-2 text-xs font-bold uppercase tracking-[0.25em] text-slate-400">
+              Choose your name
+            </p>
+            <h2 className="text-2xl font-extrabold">Join the table</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-400">
+              Your previous name is never submitted automatically when you enter a room code.
+            </p>
 
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Enter your name"
-              className="bg-white text-black placeholder-gray-500 px-4 py-3 rounded-xl text-center text-lg"
-            />
-
-            <button
-              onClick={joinRoom}
-              className="bg-green-600 hover:bg-green-700 px-6 py-3 rounded-xl font-bold"
+            <form
+              className="mt-6 flex flex-col gap-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                joinRoom();
+              }}
             >
-              Join Room
-            </button>
+              <label htmlFor="player-name" className="text-sm font-semibold text-slate-300">
+                Display name
+              </label>
+              <input
+                id="player-name"
+                value={name}
+                maxLength={24}
+                autoFocus
+                autoComplete="off"
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Enter a new name"
+                className="field px-4 py-3 text-lg"
+              />
 
-            {message && <p className="text-red-400">{message}</p>}
+              <button
+                type="submit"
+                disabled={!name.trim()}
+                className="primary-button px-6 py-3 font-extrabold"
+              >
+                Join Room <span aria-hidden="true">→</span>
+              </button>
+            </form>
+
+            {message && (
+              <p role="alert" className="mt-4 rounded-xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+                {message}
+              </p>
+            )}
           </section>
         )}
 
         {joined && room && (
           <>
-            <section className="bg-gray-900 rounded-xl p-6">
-              <h2 className="text-2xl font-bold mb-4">
-                Players ({room.players.length}/12)
-              </h2>
+            <section className="panel p-5 sm:p-7">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-400">
+                    Players
+                  </p>
+                  <h2 className="mt-1 text-2xl font-extrabold">
+                    {room.players.length} / 12 joined
+                  </h2>
+                </div>
+                <div className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-sm font-bold text-emerald-200">
+                  {readyCount} ready
+                </div>
+              </div>
 
-              <p className="text-sm text-blue-300 mb-4">
-                You are: {currentPlayer?.name || "Unknown"}
-              </p>
-
-              <div className="flex flex-col gap-3">
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
                 {room.players.map((player) => (
                   <div
                     key={player.id}
-                    className="bg-gray-800 rounded-lg px-4 py-3 flex justify-between"
+                    className={`flex min-w-0 items-center justify-between gap-3 rounded-2xl border px-4 py-3 transition-colors ${
+                      player.id === myPlayerId
+                        ? "border-amber-300/40 bg-amber-300/10"
+                        : "border-white/8 bg-white/[0.035]"
+                    }`}
                   >
-                    <span>
-                      {player.name} {player.isHost ? "👑" : ""} {player.connected === false ? "🔌" : ""}
-                    </span>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate font-bold">{player.name}</span>
+                        {player.isHost && (
+                          <span title="Host" aria-label="Host">👑</span>
+                        )}
+                        {player.id === myPlayerId && (
+                          <span className="text-xs font-semibold text-amber-200">You</span>
+                        )}
+                      </div>
+                      <p className={`mt-0.5 text-xs ${player.connected === false ? "text-slate-500" : "text-emerald-300"}`}>
+                        {player.connected === false ? "Reconnecting…" : "Online"}
+                      </p>
+                    </div>
 
-                    <span>{player.ready ? "Ready ✅" : "Not Ready"}</span>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                        player.ready
+                          ? "bg-emerald-400/15 text-emerald-200"
+                          : "bg-white/5 text-slate-400"
+                      }`}>
+                        {player.ready ? "✓ Ready" : "Not ready"}
+                      </span>
+
+                      {isHost && !player.isHost && (
+                        <button
+                          type="button"
+                          onClick={() => removePlayer(player)}
+                          disabled={Boolean(removingPlayerId)}
+                          aria-label={`Remove ${player.name}`}
+                          title={`Remove ${player.name}`}
+                          className="danger-icon-button h-9 w-9 rounded-full font-black"
+                        >
+                          {removingPlayerId === player.id ? "…" : "×"}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
 
               <button
+                type="button"
                 onClick={toggleReady}
-                className="mt-4 bg-green-600 hover:bg-green-700 px-6 py-3 rounded-xl"
+                disabled={readyPending}
+                aria-pressed={Boolean(currentPlayer?.ready)}
+                className={`mt-5 w-full px-6 py-3 font-extrabold ${
+                  currentPlayer?.ready ? "ready-button" : "primary-button"
+                }`}
               >
-                Toggle Ready
+                {readyPending
+                  ? "Updating…"
+                  : currentPlayer?.ready
+                    ? "✓ You’re Ready — Tap to Undo"
+                    : "I’m Ready"}
               </button>
+
+              {message && (
+                <p role="alert" className="mt-4 text-center text-sm text-rose-300">
+                  {message}
+                </p>
+              )}
             </section>
 
-            {isHost && (
-              <section className="bg-gray-900 rounded-xl p-6">
-                <h2 className="text-2xl font-bold mb-4">🎮Choose Game🎮</h2>
+            {isHost ? (
+              <section className="panel p-5 sm:p-7">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.25em] text-slate-400">
+                    Host controls
+                  </p>
+                  <h2 className="mt-1 text-2xl font-extrabold">Choose a game</h2>
+                </div>
 
-                <div className="flex flex-col gap-3">
-                  <button
-                    onClick={() => selectGame("higher-or-lower")}
-                    className="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-xl"
-                  >
-                    ⬆️Higher or Lower⬇️
-                  </button>
+                <div className="mt-5 grid gap-3 md:grid-cols-3">
+                  {GAME_OPTIONS.map((game) => {
+                    const isSelected = room.game === game.id;
 
-                  <button
-                    onClick={() => selectGame("ride-the-bus")}
-                    className="bg-red-600 hover:bg-red-700 px-6 py-3 rounded-xl"
-                  >
-                    🚌Ride The Bus🚌
-                  </button>
-
-                  <button
-                    onClick={() => selectGame("horse-racing")}
-                    className="bg-purple-600 hover:bg-purple-700 px-6 py-3 rounded-xl"
-                  >
-                    🏇Horse Racing🏁
-                  </button>
+                    return (
+                      <button
+                        key={game.id}
+                        type="button"
+                        onClick={() => selectGame(game.id)}
+                        aria-pressed={isSelected}
+                        className={`rounded-2xl border bg-gradient-to-br p-4 text-left ${game.accent} ${
+                          isSelected
+                            ? "ring-2 ring-amber-300 ring-offset-2 ring-offset-slate-950"
+                            : "opacity-80 hover:opacity-100"
+                        }`}
+                      >
+                        <span className="text-3xl" aria-hidden="true">{game.icon}</span>
+                        <span className="mt-3 block font-extrabold">{game.title}</span>
+                        <span className="mt-1 block text-xs leading-5 text-slate-300">
+                          {game.description}
+                        </span>
+                        {isSelected && (
+                          <span className="mt-3 block text-xs font-bold text-amber-200">✓ Selected</span>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 <button
+                  type="button"
                   onClick={startGame}
                   disabled={!room.game}
-                  className="mt-6 bg-yellow-500 hover:bg-yellow-600 disabled:bg-gray-600 text-black px-6 py-3 rounded-xl font-bold w-full"
+                  className="primary-button mt-6 w-full px-6 py-3 font-extrabold"
                 >
-                  Start Selected Game
+                  {selectedGame ? `Start ${selectedGame.title}` : "Select a Game to Start"}
                 </button>
               </section>
-            )}
-
-            {room.game && (
-              <section className="bg-gray-900 rounded-xl p-6 text-center">
-                <p className="text-xl">
-                  Selected Game:{" "}
-                  <span className="font-bold text-yellow-300">
-                    {room.game}
-                  </span>
-                </p>
+            ) : (
+              <section className="panel p-5 text-center text-sm text-slate-300">
+                {selectedGame ? (
+                  <p>
+                    The host selected <strong className="text-amber-200">{selectedGame.title}</strong>.
+                  </p>
+                ) : (
+                  <p>Waiting for the host to choose a game…</p>
+                )}
               </section>
             )}
           </>

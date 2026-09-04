@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { io, Socket } from "socket.io-client";
+import { loadPlayerSession, savePlayerSession } from "@/lib/player-session";
 
 type Card = {
   suit: string;
@@ -53,15 +54,15 @@ export default function HigherOrLowerPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const urlRoomId = params.get("roomId")?.toUpperCase() || "";
-    const savedPlayerId = localStorage.getItem("playerId") || "";
-    const savedName = localStorage.getItem("playerName") || "";
-
-    setRoomId(urlRoomId);
-    setMyPlayerId(savedPlayerId);
+    const { playerId: savedPlayerId, name: savedName } =
+      loadPlayerSession(urlRoomId);
 
     socket = io();
 
     socket.on("connect", () => {
+      setRoomId(urlRoomId);
+      setMyPlayerId(savedPlayerId);
+
       if (urlRoomId) {
         if (!savedPlayerId && !savedName) {
           window.location.href = `/rooms/${urlRoomId}`;
@@ -88,8 +89,7 @@ export default function HigherOrLowerPage() {
     });
 
     socket.on("player-joined", ({ playerId, name }) => {
-      localStorage.setItem("playerId", playerId);
-      localStorage.setItem("playerName", name);
+      savePlayerSession(urlRoomId, playerId, name);
       setMyPlayerId(playerId);
     });
 
@@ -104,7 +104,7 @@ export default function HigherOrLowerPage() {
 
   if (!room || !room.gameState) {
     return (
-      <main className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
+      <main className="app-shell flex items-center justify-center">
         Loading Higher or Lower...
       </main>
     );
@@ -149,9 +149,9 @@ export default function HigherOrLowerPage() {
   }
 
   return (
-    <main className="min-h-screen bg-gray-950 text-white p-6">
+    <main className="app-shell p-4 sm:p-6">
       <div className="max-w-5xl mx-auto flex flex-col items-center gap-6">
-        <h1 className="text-5xl font-bold">🔢 Higher or Lower</h1>
+        <h1 className="text-center text-4xl font-black sm:text-5xl">🔢 Higher or Lower</h1>
 
         <div className="text-center">
           <p className="text-sm text-gray-400">Room: {room.id}</p>
@@ -180,7 +180,7 @@ export default function HigherOrLowerPage() {
           )}
         </div>
 
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-3 gap-2 sm:gap-4">
           {game.grid.map((stack: Card[], index: number) => {
             const topCard = stack[stack.length - 1];
             const isSelected = game.selectedStackIndex === index;
@@ -190,7 +190,7 @@ export default function HigherOrLowerPage() {
                 key={index}
                 onClick={() => selectStack(index)}
                 disabled={!isMyTurn || game.gameOver}
-                className={`relative w-28 h-40 rounded-xl border-4 transition disabled:opacity-60 ${
+                className={`relative h-36 w-24 rounded-xl border-4 transition disabled:opacity-60 sm:h-40 sm:w-28 ${
                   isSelected
                     ? "border-yellow-300 scale-105"
                     : "border-white/20"
